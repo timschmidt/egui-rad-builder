@@ -1,5 +1,4 @@
 use std::fmt;
-
 use egui::{Pos2, Vec2, pos2};
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +21,10 @@ impl fmt::Display for WidgetId {
     }
 }
 
+#[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize,Deserialize)]
+pub(crate) enum DockArea { Free, Top, Bottom, Left, Right, Center }
+impl Default for DockArea { fn default()->Self { DockArea::Free } }
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Widget {
     pub(crate) id: WidgetId,
@@ -29,6 +32,7 @@ pub(crate) struct Widget {
     pub(crate) pos: Pos2,  // Top-left relative to canvas
     pub(crate) size: Vec2, // Desired size on canvas
     pub(crate) z: i32,     // draw order
+    pub(crate) area: DockArea,
     pub(crate) props: WidgetProps,
 }
 
