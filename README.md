@@ -3,17 +3,16 @@ Tool for quickly designing egui user interfaces.  This tool is under active deve
 
 <img src="doc/egui-rad-builder-screenshot.png" width=45% alt="egui RAD builder screenshot"/> <img src="doc/ui-screenshot.png" width=45% alt="Generated UI"/>
 
-# build
+## build and run
 ```shell
 cargo build
 ```
 
-# run
 ```shell
 cargo run
 ```
 
-# use
+## use
 - Drag and drop controls from the pallette into the central canvas.
 - Control properties can be edited in the Inspector on the right.
 - Click 'Generate Code' to produce your UI boilerplate in the output text area.
@@ -35,7 +34,7 @@ egui_extras = { version = "0.33.0", features = ["chrono"] }
 - Copy the generated code and paste it into 'src/main.rs'
 - Build and run the project with 'cargo build'
 
-# todo
+## todo
 - add support for multiple 'pages', 'screens', or 'tabs'
 - add support for columns
 - flesh out font, scaling, color options in inspector

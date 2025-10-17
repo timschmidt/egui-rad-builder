@@ -42,6 +42,13 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "egui RAD GUI Builder",
         native_options,
-        Box::new(|_cc| Ok(Box::<RadBuilderApp>::default())),
+        Box::new(|cc| Ok(Box::new({
+            #[cfg(not(feature = "persistence"))]
+            return RadBuilderApp::default();
+            #[cfg(feature = "persistence")]
+            if let Some(storage) = cc.storage {
+                eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
+            } else { RadBuilderApp::default() }
+        })))
     )
 }
