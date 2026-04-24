@@ -1676,28 +1676,26 @@ impl RadBuilderApp {
                     .on_hover_text("Automatically regenerate code when widgets change");
                 ui.checkbox(&mut self.codegen_comments, "Include comments")
                     .on_hover_text("Add explanatory comments to generated code");
-                ui.horizontal(|ui| {
-                    ui.label("Output format:");
-                    egui::ComboBox::from_id_salt("codegen_format")
-                        .selected_text(self.codegen_format.display_name())
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut self.codegen_format,
-                                CodeGenFormat::SingleFile,
-                                "Single File",
-                            );
-                            ui.selectable_value(
-                                &mut self.codegen_format,
-                                CodeGenFormat::SeparateFiles,
-                                "Separate Files",
-                            );
-                            ui.selectable_value(
-                                &mut self.codegen_format,
-                                CodeGenFormat::UiOnly,
-                                "UI Function Only",
-                            );
-                        });
-                });
+                ui.separator();
+                ui.label(format!(
+                    "Output format: {}",
+                    self.codegen_format.display_name()
+                ));
+                ui.selectable_value(
+                    &mut self.codegen_format,
+                    CodeGenFormat::SingleFile,
+                    "Single File",
+                );
+                ui.selectable_value(
+                    &mut self.codegen_format,
+                    CodeGenFormat::SeparateFiles,
+                    "Separate Files",
+                );
+                ui.selectable_value(
+                    &mut self.codegen_format,
+                    CodeGenFormat::UiOnly,
+                    "UI Function Only",
+                );
                 });
             });
 
