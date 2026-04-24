@@ -1,6 +1,6 @@
 [package]
 name = "egui-rad-builder"
-version = "0.1.10"
+version = "0.2.0"
 edition = "2024"
 description = "Tool for quickly designing egui user interfaces "
 authors = ["Timothy Schmidt <timschmidt@gmail.com>"]
