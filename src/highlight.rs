@@ -128,6 +128,7 @@ pub fn code_editor_highlighted(
             // The user can toggle between edit and view modes
             let response = ui.add(
                 egui::TextEdit::multiline(code)
+                    .id_salt("highlight_code_editor")
                     .code_editor()
                     .desired_rows(18)
                     .desired_width(f32::INFINITY),

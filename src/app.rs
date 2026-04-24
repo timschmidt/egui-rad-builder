@@ -6,6 +6,7 @@ use crate::{
 use chrono::{Datelike, NaiveDate};
 use egui::{Color32, CornerRadius, Id, Pos2, Rect, Sense, Stroke, UiBuilder, pos2, vec2};
 use egui_extras::DatePickerButton;
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 /// Code generation output format
@@ -105,6 +106,44 @@ impl Default for RadBuilderApp {
 }
 
 impl RadBuilderApp {
+    fn normalize_project_widget_ids(&mut self) {
+        let mut seen = HashSet::new();
+        let mut next_id = self
+            .project
+            .widgets
+            .iter()
+            .map(|w| w.id.as_z() as u64 + 1)
+            .max()
+            .unwrap_or(1);
+        let mut had_duplicates = false;
+
+        for w in &mut self.project.widgets {
+            if seen.insert(w.id) {
+                continue;
+            }
+
+            had_duplicates = true;
+            while seen.contains(&WidgetId::new(next_id)) {
+                next_id += 1;
+            }
+
+            w.id = WidgetId::new(next_id);
+            w.z = w.id.as_z();
+            seen.insert(w.id);
+            next_id += 1;
+        }
+
+        self.next_id = next_id;
+        self.selected
+            .retain(|id| self.project.widgets.iter().any(|w| w.id == *id));
+        self.selected.sort();
+        self.selected.dedup();
+
+        if had_duplicates {
+            self.set_status("Duplicate widget IDs were normalized".into());
+        }
+    }
+
     fn area_at(&self, pos: Pos2) -> DockArea {
         if let Some(r) = self.live_top
             && r.contains(pos)
@@ -236,12 +275,8 @@ impl RadBuilderApp {
             Ok(json) => {
                 match serde_json::from_str::<Project>(&json) {
                     Ok(project) => {
-                        // Find max widget id to continue numbering
-                        let max_id = project.widgets.iter().map(|w| w.id).max();
-                        if let Some(id) = max_id {
-                            self.next_id = id.as_z() as u64 + 1;
-                        }
                         self.project = project;
+                        self.normalize_project_widget_ids();
                         self.selected.clear();
                         self.current_file = Some(path.clone());
                         self.set_status(format!("Loaded {}", path.display()));
@@ -475,149 +510,157 @@ impl RadBuilderApp {
         w: &mut Widget,
     ) {
         let rect = Rect::from_min_size(canvas_rect.min + w.pos.to_vec2(), w.size);
-        ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| {
-            match w.kind {
-                WidgetKind::MenuButton => {
-                    let items = if w.props.items.is_empty() {
-                        vec!["Item".into()]
-                    } else {
-                        w.props.items.clone()
-                    };
-                    let mut sel = w.props.selected.min(items.len() - 1);
-                    ui.menu_button(&w.props.text, |ui| {
-                        for (i, it) in items.iter().enumerate() {
-                            if ui.button(it).clicked() {
-                                sel = i;
-                                ui.close_kind(egui::UiKind::Menu);
-                            }
-                        }
-                    });
-                    w.props.selected = sel;
-                }
-                WidgetKind::Label => {
-                    ui.vertical_centered(|ui| {
-                        ui.label(&w.props.text);
-                    });
-                }
-                WidgetKind::Button => {
-                    ui.add_sized(w.size, egui::Button::new(&w.props.text));
-                }
-                WidgetKind::ImageTextButton => {
-                    // We keep it simple: icon + text as the button label.
-                    // Users can change `icon` to any emoji / short string.
-                    let label = format!("{}  {}", w.props.icon, w.props.text);
-                    ui.add_sized(w.size, egui::Button::new(label));
-                }
-                WidgetKind::Checkbox => {
-                    let mut checked = w.props.checked;
-                    ui.add_sized(w.size, egui::Checkbox::new(&mut checked, &w.props.text));
-                    w.props.checked = checked;
-                }
-                WidgetKind::TextEdit => {
-                    let mut buf = w.props.text.clone();
-                    let resp = egui::TextEdit::singleline(&mut buf).hint_text("text");
-                    ui.add_sized(w.size, resp);
-                    w.props.text = buf;
-                }
-                WidgetKind::Slider => {
-                    let mut v = w.props.value;
-                    let slider =
-                        egui::Slider::new(&mut v, w.props.min..=w.props.max).text(&w.props.text);
-                    ui.add_sized(w.size, slider);
-                    w.props.value = v;
-                }
-                WidgetKind::ProgressBar => {
-                    let bar =
-                        egui::ProgressBar::new(w.props.value.clamp(0.0, 1.0)).show_percentage();
-                    ui.add_sized(w.size, bar);
-                }
-                WidgetKind::RadioGroup => {
-                    let mut sel = w.props.selected.min(w.props.items.len().saturating_sub(1));
-                    ui.vertical(|ui| {
-                        for (i, it) in w.props.items.iter().enumerate() {
-                            if ui.add(egui::RadioButton::new(sel == i, it)).clicked() {
-                                sel = i;
-                            }
-                        }
-                    });
-                    w.props.selected = sel;
-                }
-                WidgetKind::Link => {
-                    let _ = ui.link(&w.props.text);
-                }
-                WidgetKind::Hyperlink => {
-                    ui.hyperlink_to(&w.props.text, &w.props.url);
-                }
-                WidgetKind::SelectableLabel => {
-                    let mut on = w.props.checked;
-                    if ui
-                        .add(egui::Button::selectable(on, &w.props.text))
-                        .clicked()
-                    {
-                        on = !on;
+        ui.push_id(("widget", w.id), |ui| {
+            ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| {
+                match w.kind {
+                    WidgetKind::MenuButton => {
+                        let items = if w.props.items.is_empty() {
+                            vec!["Item".into()]
+                        } else {
+                            w.props.items.clone()
+                        };
+                        let mut sel = w.props.selected.min(items.len() - 1);
+                        ui.push_id(("menu_button", w.id), |ui| {
+                            ui.menu_button(&w.props.text, |ui| {
+                                for (i, it) in items.iter().enumerate() {
+                                    if ui.button(it).clicked() {
+                                        sel = i;
+                                        ui.close_kind(egui::UiKind::Menu);
+                                    }
+                                }
+                            });
+                        });
+                        w.props.selected = sel;
                     }
-                    w.props.checked = on;
-                }
-                WidgetKind::ComboBox => {
-                    let items = if w.props.items.is_empty() {
-                        vec!["Item".into()]
-                    } else {
-                        w.props.items.clone()
-                    };
-                    let mut sel = w.props.selected.min(items.len() - 1);
-                    egui::ComboBox::from_id_salt(w.id)
-                        .width(w.size.x)
-                        .selected_text(items[sel].clone())
-                        .show_ui(ui, |ui| {
-                            for (i, it) in items.iter().enumerate() {
-                                ui.selectable_value(&mut sel, i, it.clone());
+                    WidgetKind::Label => {
+                        ui.vertical_centered(|ui| {
+                            ui.label(&w.props.text);
+                        });
+                    }
+                    WidgetKind::Button => {
+                        ui.add_sized(w.size, egui::Button::new(&w.props.text));
+                    }
+                    WidgetKind::ImageTextButton => {
+                        // We keep it simple: icon + text as the button label.
+                        // Users can change `icon` to any emoji / short string.
+                        let label = format!("{}  {}", w.props.icon, w.props.text);
+                        ui.add_sized(w.size, egui::Button::new(label));
+                    }
+                    WidgetKind::Checkbox => {
+                        let mut checked = w.props.checked;
+                        ui.add_sized(w.size, egui::Checkbox::new(&mut checked, &w.props.text));
+                        w.props.checked = checked;
+                    }
+                    WidgetKind::TextEdit => {
+                        let mut buf = w.props.text.clone();
+                        let resp = egui::TextEdit::singleline(&mut buf)
+                            .id_salt(("text_edit", w.id))
+                            .hint_text("text");
+                        ui.add_sized(w.size, resp);
+                        w.props.text = buf;
+                    }
+                    WidgetKind::Slider => {
+                        let mut v = w.props.value;
+                        let slider = egui::Slider::new(&mut v, w.props.min..=w.props.max)
+                            .text(&w.props.text);
+                        ui.add_sized(w.size, slider);
+                        w.props.value = v;
+                    }
+                    WidgetKind::ProgressBar => {
+                        let bar =
+                            egui::ProgressBar::new(w.props.value.clamp(0.0, 1.0)).show_percentage();
+                        ui.add_sized(w.size, bar);
+                    }
+                    WidgetKind::RadioGroup => {
+                        let mut sel = w.props.selected.min(w.props.items.len().saturating_sub(1));
+                        ui.vertical(|ui| {
+                            for (i, it) in w.props.items.iter().enumerate() {
+                                if ui.add(egui::RadioButton::new(sel == i, it)).clicked() {
+                                    sel = i;
+                                }
                             }
                         });
-                    w.props.selected = sel;
-                }
-                WidgetKind::Separator => {
-                    ui.separator();
-                }
-                WidgetKind::CollapsingHeader => {
-                    egui::CollapsingHeader::new(&w.props.text)
-                        .default_open(w.props.checked)
-                        .show(ui, |ui| {
-                            ui.label("… place your inner content here …");
+                        w.props.selected = sel;
+                    }
+                    WidgetKind::Link => {
+                        let _ = ui.link(&w.props.text);
+                    }
+                    WidgetKind::Hyperlink => {
+                        ui.hyperlink_to(&w.props.text, &w.props.url);
+                    }
+                    WidgetKind::SelectableLabel => {
+                        let mut on = w.props.checked;
+                        if ui
+                            .add(egui::Button::selectable(on, &w.props.text))
+                            .clicked()
+                        {
+                            on = !on;
+                        }
+                        w.props.checked = on;
+                    }
+                    WidgetKind::ComboBox => {
+                        let items = if w.props.items.is_empty() {
+                            vec!["Item".into()]
+                        } else {
+                            w.props.items.clone()
+                        };
+                        let mut sel = w.props.selected.min(items.len() - 1);
+                        egui::ComboBox::from_id_salt(w.id)
+                            .width(w.size.x)
+                            .selected_text(items[sel].clone())
+                            .show_ui(ui, |ui| {
+                                for (i, it) in items.iter().enumerate() {
+                                    ui.selectable_value(&mut sel, i, it.clone());
+                                }
+                            });
+                        w.props.selected = sel;
+                    }
+                    WidgetKind::Separator => {
+                        ui.separator();
+                    }
+                    WidgetKind::CollapsingHeader => {
+                        egui::CollapsingHeader::new(&w.props.text)
+                            .id_salt(("collapsing_header", w.id))
+                            .default_open(w.props.checked)
+                            .show(ui, |ui| {
+                                ui.label("… place your inner content here …");
+                            });
+                    }
+                    WidgetKind::DatePicker => {
+                        let mut date = NaiveDate::from_ymd_opt(
+                            w.props.year,
+                            w.props.month.clamp(1, 12),
+                            w.props.day.clamp(1, 28), // simple clamp
+                        )
+                        .unwrap_or_else(|| NaiveDate::from_ymd_opt(2025, 1, 1).unwrap());
+                        ui.horizontal(|ui| {
+                            ui.label(&w.props.text);
+                            let date_picker_id = format!("date_picker_{}", w.id);
+                            ui.add(DatePickerButton::new(&mut date).id_salt(&date_picker_id));
                         });
-                }
-                WidgetKind::DatePicker => {
-                    let mut date = NaiveDate::from_ymd_opt(
-                        w.props.year,
-                        w.props.month.clamp(1, 12),
-                        w.props.day.clamp(1, 28), // simple clamp
-                    )
-                    .unwrap_or_else(|| NaiveDate::from_ymd_opt(2025, 1, 1).unwrap());
-                    ui.horizontal(|ui| {
-                        ui.label(&w.props.text);
-                        ui.add(DatePickerButton::new(&mut date));
-                    });
-                    w.props.year = date.year();
-                    w.props.month = date.month();
-                    w.props.day = date.day();
-                }
-                WidgetKind::AngleSelector => {
-                    // Angle editor as slider in degrees
-                    let mut v = w.props.value.clamp(w.props.min, w.props.max);
-                    let slider = egui::Slider::new(&mut v, w.props.min..=w.props.max)
-                        .suffix("°")
-                        .text(&w.props.text);
-                    ui.add_sized(w.size, slider);
-                    w.props.value = v;
-                }
-                WidgetKind::Password => {
-                    let mut buf = w.props.text.clone();
-                    let resp = egui::TextEdit::singleline(&mut buf)
-                        .password(true)
-                        .hint_text("password");
-                    ui.add_sized(w.size, resp);
-                    w.props.text = buf;
-                }
-                WidgetKind::Tree => {
+                        w.props.year = date.year();
+                        w.props.month = date.month();
+                        w.props.day = date.day();
+                    }
+                    WidgetKind::AngleSelector => {
+                        // Angle editor as slider in degrees
+                        let mut v = w.props.value.clamp(w.props.min, w.props.max);
+                        let slider = egui::Slider::new(&mut v, w.props.min..=w.props.max)
+                            .suffix("°")
+                            .text(&w.props.text);
+                        ui.add_sized(w.size, slider);
+                        w.props.value = v;
+                    }
+                    WidgetKind::Password => {
+                        let mut buf = w.props.text.clone();
+                        let resp = egui::TextEdit::singleline(&mut buf)
+                            .id_salt(("password_edit", w.id))
+                            .password(true)
+                            .hint_text("password");
+                        ui.add_sized(w.size, resp);
+                        w.props.text = buf;
+                    }
+                    WidgetKind::Tree => {
                     // Parse items (two leading spaces per level) into nodes:
                     #[derive(Clone)]
                     struct Node {
@@ -663,14 +706,18 @@ impl RadBuilderApp {
                         build(&mut it, 0)
                     }
 
-                    fn show_nodes(ui: &mut egui::Ui, nodes: &[Node]) {
-                        for n in nodes {
+                    fn show_nodes(ui: &mut egui::Ui, nodes: &[Node], path: &mut Vec<usize>) {
+                        for (idx, n) in nodes.iter().enumerate() {
                             if n.children.is_empty() {
                                 ui.label(&n.label);
                             } else {
-                                ui.collapsing(&n.label, |ui| {
-                                    show_nodes(ui, &n.children);
-                                });
+                                path.push(idx);
+                                egui::CollapsingHeader::new(&n.label)
+                                    .id_salt(("tree_node", path.clone()))
+                                    .show(ui, |ui| {
+                                        show_nodes(ui, &n.children, path);
+                                    });
+                                path.pop();
                             }
                         }
                     }
@@ -685,32 +732,35 @@ impl RadBuilderApp {
                     // Constrain content to the widget rect:
                     egui::Frame::NONE.show(ui, |ui| {
                         egui::ScrollArea::vertical()
+                            .id_salt(("tree_scroll", w.id))
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                show_nodes(ui, &nodes);
+                                let mut path = Vec::new();
+                                show_nodes(ui, &nodes, &mut path);
                             });
                     });
-                }
-                WidgetKind::TextArea => {
+                    }
+                    WidgetKind::TextArea => {
                     let mut buf = w.props.text.clone();
                     let resp = egui::TextEdit::multiline(&mut buf)
+                        .id_salt(("text_area", w.id))
                         .desired_width(w.size.x)
                         .desired_rows(5);
                     ui.add_sized(w.size, resp);
                     w.props.text = buf;
-                }
-                WidgetKind::DragValue => {
+                    }
+                    WidgetKind::DragValue => {
                     let mut v = w.props.value;
                     ui.horizontal(|ui| {
                         ui.label(&w.props.text);
                         ui.add(egui::DragValue::new(&mut v).range(w.props.min..=w.props.max));
                     });
                     w.props.value = v;
-                }
-                WidgetKind::Spinner => {
-                    ui.add(egui::Spinner::new());
-                }
-                WidgetKind::ColorPicker => {
+                    }
+                    WidgetKind::Spinner => {
+                        ui.add(egui::Spinner::new());
+                    }
+                    WidgetKind::ColorPicker => {
                     let mut color = Color32::from_rgba_unmultiplied(
                         w.props.color[0],
                         w.props.color[1],
@@ -726,31 +776,33 @@ impl RadBuilderApp {
                         );
                     });
                     w.props.color = [color.r(), color.g(), color.b(), color.a()];
-                }
-                WidgetKind::Code => {
+                    }
+                    WidgetKind::Code => {
                     let mut buf = w.props.text.clone();
                     egui::ScrollArea::vertical()
+                        .id_salt(("code_scroll", w.id))
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
                             ui.add(
                                 egui::TextEdit::multiline(&mut buf)
+                                    .id_salt(("code_editor", w.id))
                                     .code_editor()
                                     .desired_width(w.size.x)
                                     .desired_rows(8),
                             );
                         });
                     w.props.text = buf;
-                }
-                WidgetKind::Heading => {
-                    ui.heading(&w.props.text);
-                }
-                WidgetKind::Small => {
-                    ui.small(&w.props.text);
-                }
-                WidgetKind::Monospace => {
-                    ui.monospace(&w.props.text);
-                }
-                WidgetKind::Image => {
+                    }
+                    WidgetKind::Heading => {
+                        ui.heading(&w.props.text);
+                    }
+                    WidgetKind::Small => {
+                        ui.small(&w.props.text);
+                    }
+                    WidgetKind::Monospace => {
+                        ui.monospace(&w.props.text);
+                    }
+                    WidgetKind::Image => {
                     // Show placeholder with image info
                     let color = Color32::from_rgba_unmultiplied(80, 80, 80, 200);
                     egui::Frame::NONE
@@ -765,8 +817,8 @@ impl RadBuilderApp {
                                 ));
                             });
                         });
-                }
-                WidgetKind::Placeholder => {
+                    }
+                    WidgetKind::Placeholder => {
                     let color = Color32::from_rgba_unmultiplied(
                         w.props.color[0],
                         w.props.color[1],
@@ -783,8 +835,8 @@ impl RadBuilderApp {
                                 ui.label(&w.props.text);
                             });
                         });
-                }
-                WidgetKind::Group => {
+                    }
+                    WidgetKind::Group => {
                     egui::Frame::group(ui.style()).show(ui, |ui| {
                         ui.set_min_size(w.size - vec2(12.0, 12.0));
                         let add_contents = |ui: &mut egui::Ui| {
@@ -800,13 +852,14 @@ impl RadBuilderApp {
                             ui.vertical(add_contents);
                         }
                     });
-                }
-                WidgetKind::ScrollBox => {
+                    }
+                    WidgetKind::ScrollBox => {
                     egui::Frame::NONE
                         .stroke(Stroke::new(1.0, Color32::GRAY))
                         .corner_radius(4.0)
                         .show(ui, |ui| {
                             egui::ScrollArea::both()
+                                .id_salt(("scroll_box", w.id))
                                 .max_width(w.size.x - 4.0)
                                 .max_height(w.size.y - 4.0)
                                 .auto_shrink([false, false])
@@ -814,8 +867,8 @@ impl RadBuilderApp {
                                     ui.label(&w.props.text);
                                 });
                         });
-                }
-                WidgetKind::TabBar => {
+                    }
+                    WidgetKind::TabBar => {
                     ui.horizontal(|ui| {
                         for (i, item) in w.props.items.iter().enumerate() {
                             let selected = i == w.props.selected;
@@ -824,8 +877,8 @@ impl RadBuilderApp {
                             }
                         }
                     });
-                }
-                WidgetKind::Columns => {
+                    }
+                    WidgetKind::Columns => {
                     let cols = w.props.columns.max(1);
                     egui::Frame::NONE
                         .stroke(Stroke::new(1.0, Color32::GRAY))
@@ -838,26 +891,27 @@ impl RadBuilderApp {
                                 }
                             });
                         });
-                }
-                WidgetKind::Window => {
-                    egui::Frame::window(ui.style()).show(ui, |ui| {
-                        ui.set_min_size(w.size - vec2(16.0, 16.0));
-                        ui.vertical(|ui| {
-                            ui.horizontal(|ui| {
-                                ui.strong(&w.props.text);
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.small("✕");
-                                    },
-                                );
+                    }
+                    WidgetKind::Window => {
+                        egui::Frame::window(ui.style()).show(ui, |ui| {
+                            ui.set_min_size(w.size - vec2(16.0, 16.0));
+                            ui.vertical(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.strong(&w.props.text);
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            ui.small("✕");
+                                        },
+                                    );
+                                });
+                                ui.separator();
+                                ui.label("(window contents)");
                             });
-                            ui.separator();
-                            ui.label("(window contents)");
                         });
-                    });
+                    }
                 }
-            }
+            });
         });
         let is_edit_mode = ui
             .ctx()
@@ -959,15 +1013,18 @@ impl RadBuilderApp {
     }
 
     fn palette_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Palette");
-        ui.separator();
-        ui.label("Drag any control onto the canvas");
-        ui.add_space(4.0);
+        ui.push_id("palette_ui", |ui| {
+            ui.heading("Palette");
+            ui.separator();
+            ui.label("Drag any control onto the canvas");
+            ui.add_space(4.0);
 
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("palette_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
                 egui::CollapsingHeader::new("Basic")
+                    .id_salt("palette_basic")
                     .default_open(true)
                     .show(ui, |ui| {
                         self.palette_item(ui, "Label", WidgetKind::Label);
@@ -981,6 +1038,7 @@ impl RadBuilderApp {
                     });
 
                 egui::CollapsingHeader::new("Input")
+                    .id_salt("palette_input")
                     .default_open(true)
                     .show(ui, |ui| {
                         self.palette_item(ui, "TextEdit", WidgetKind::TextEdit);
@@ -996,6 +1054,7 @@ impl RadBuilderApp {
                     });
 
                 egui::CollapsingHeader::new("Display")
+                    .id_salt("palette_display")
                     .default_open(true)
                     .show(ui, |ui| {
                         self.palette_item(ui, "Heading", WidgetKind::Heading);
@@ -1008,6 +1067,7 @@ impl RadBuilderApp {
                     });
 
                 egui::CollapsingHeader::new("Containers")
+                    .id_salt("palette_containers")
                     .default_open(true)
                     .show(ui, |ui| {
                         self.palette_item(ui, "Group", WidgetKind::Group);
@@ -1019,6 +1079,7 @@ impl RadBuilderApp {
                     });
 
                 egui::CollapsingHeader::new("Advanced")
+                    .id_salt("palette_advanced")
                     .default_open(false)
                     .show(ui, |ui| {
                         self.palette_item(ui, "Menu Button", WidgetKind::MenuButton);
@@ -1029,6 +1090,7 @@ impl RadBuilderApp {
                 ui.add_space(8.0);
                 ui.separator();
                 egui::CollapsingHeader::new("Shortcuts")
+                    .id_salt("palette_shortcuts")
                     .default_open(false)
                     .show(ui, |ui| {
                         ui.small("Arrows: nudge widget");
@@ -1039,7 +1101,8 @@ impl RadBuilderApp {
                         ui.small("Ctrl+G: generate");
                         ui.small("F5: toggle preview");
                     });
-            });
+                });
+        });
     }
 
     fn palette_item(&mut self, ui: &mut egui::Ui, label: &str, kind: WidgetKind) {
@@ -1051,6 +1114,7 @@ impl RadBuilderApp {
 
     fn inspector_ui(&mut self, ui: &mut egui::Ui) {
         let grid = self.grid_size; // read before mutably borrowing self
+        ui.push_id("inspector_ui", |ui| {
         ui.heading("Inspector");
         ui.separator();
         if let Some(w) = self.selected_mut() {
@@ -1080,7 +1144,10 @@ impl RadBuilderApp {
                 | WidgetKind::Window
                 | WidgetKind::Columns => {
                     ui.label("Text");
-                    ui.text_edit_singleline(&mut w.props.text);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut w.props.text)
+                            .id_salt(("inspector_text", w.id)),
+                    );
                 }
                 WidgetKind::ProgressBar
                 | WidgetKind::RadioGroup
@@ -1091,27 +1158,40 @@ impl RadBuilderApp {
                 | WidgetKind::TabBar => {}
                 WidgetKind::MenuButton => {
                     ui.label("Text");
-                    ui.text_edit_singleline(&mut w.props.text);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut w.props.text)
+                            .id_salt(("inspector_menu_text", w.id)),
+                    );
                 }
                 WidgetKind::TextArea | WidgetKind::Code | WidgetKind::ScrollBox => {
                     ui.label("Content");
                     ui.add(
                         egui::TextEdit::multiline(&mut w.props.text)
+                            .id_salt(("inspector_content", w.id))
                             .desired_rows(6)
                             .desired_width(f32::INFINITY),
                     );
                 }
                 WidgetKind::Image => {
                     ui.label("Filename");
-                    ui.text_edit_singleline(&mut w.props.text);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut w.props.text)
+                            .id_salt(("inspector_image_filename", w.id)),
+                    );
                     ui.label("URI");
-                    ui.text_edit_singleline(&mut w.props.url);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut w.props.url)
+                            .id_salt(("inspector_image_uri", w.id)),
+                    );
                 }
             }
             match w.kind {
                 WidgetKind::ImageTextButton => {
                     ui.label("Icon / Emoji");
-                    ui.text_edit_singleline(&mut w.props.icon);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut w.props.icon)
+                            .id_salt(("inspector_icon", w.id)),
+                    );
                 }
                 WidgetKind::Checkbox => {
                     ui.checkbox(&mut w.props.checked, "checked");
@@ -1129,7 +1209,10 @@ impl RadBuilderApp {
                 }
                 WidgetKind::Hyperlink => {
                     ui.label("URL");
-                    ui.text_edit_singleline(&mut w.props.url);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut w.props.url)
+                            .id_salt(("inspector_hyperlink_url", w.id)),
+                    );
                 }
                 WidgetKind::RadioGroup
                 | WidgetKind::ComboBox
@@ -1145,6 +1228,7 @@ impl RadBuilderApp {
                     if ui
                         .add(
                             egui::TextEdit::multiline(&mut buf)
+                                .id_salt(("inspector_items", w.id))
                                 .desired_rows(8)
                                 .desired_width(f32::INFINITY),
                         )
@@ -1268,7 +1352,10 @@ impl RadBuilderApp {
 
             ui.separator();
             ui.label("Tooltip (optional)");
-            ui.text_edit_singleline(&mut w.props.tooltip);
+            ui.add(
+                egui::TextEdit::singleline(&mut w.props.tooltip)
+                    .id_salt(("inspector_tooltip", w.id)),
+            );
 
             ui.add_space(6.0);
             if ui.button("Delete").clicked() {
@@ -1279,28 +1366,32 @@ impl RadBuilderApp {
         } else {
             ui.weak("No selection");
         }
+        });
     }
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
-        // Show status message if recent
-        if let Some((msg, time)) = &self.status_message {
-            if time.elapsed().as_secs() < 3 {
-                ui.horizontal(|ui| {
-                    ui.label(msg);
-                });
-            } else {
-                self.status_message = None;
+        ui.push_id("top_bar", |ui| {
+            // Show status message if recent
+            if let Some((msg, time)) = &self.status_message {
+                if time.elapsed().as_secs() < 3 {
+                    ui.horizontal(|ui| {
+                        ui.label(msg);
+                    });
+                } else {
+                    self.status_message = None;
+                }
             }
-        }
 
-        egui::MenuBar::new().ui(ui, |ui| {
-            ui.menu_button("File", |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
+            ui.push_id("menu_file", |ui| {
+                ui.menu_button("File", |ui| {
                 if ui
                     .button("New Project")
                     .on_hover_text("Create a new empty project")
                     .clicked()
                 {
                     self.project = Project::default();
+                    self.next_id = 1;
                     self.selected.clear();
                     self.current_file = None;
                     self.set_status("New project created".into());
@@ -1376,13 +1467,16 @@ impl RadBuilderApp {
                 {
                     if let Ok(p) = serde_json::from_str::<Project>(&self.generated) {
                         self.project = p;
+                        self.normalize_project_widget_ids();
                         self.selected.clear();
                     }
                     ui.close_kind(egui::UiKind::Menu);
                 }
+                });
             });
 
-            ui.menu_button("Edit", |ui| {
+            ui.push_id("menu_edit", |ui| {
+                ui.menu_button("Edit", |ui| {
                 let has_selection = !self.selected.is_empty();
                 let _multi_selected = self.selected.len() > 1;
 
@@ -1443,10 +1537,12 @@ impl RadBuilderApp {
                     self.selected.clear();
                     ui.close_kind(egui::UiKind::Menu);
                 }
+                });
             });
 
             // Alignment menu (only enabled with multi-select)
-            ui.menu_button("Align", |ui| {
+            ui.push_id("menu_align", |ui| {
+                ui.menu_button("Align", |ui| {
                 let multi_selected = self.selected.len() > 1;
                 ui.add_enabled_ui(multi_selected, |ui| {
                     ui.label("Horizontal:");
@@ -1541,8 +1637,10 @@ impl RadBuilderApp {
                     ui.label("Select 2+ widgets to align");
                 }
             });
+            });
 
-            ui.menu_button("View", |ui| {
+            ui.push_id("menu_view", |ui| {
+                ui.menu_button("View", |ui| {
                 ui.checkbox(&mut self.palette_open, "Show Palette");
                 ui.checkbox(&mut self.show_grid, "Show Grid");
                 ui.checkbox(&mut self.syntax_highlighting, "Syntax Highlighting")
@@ -1551,8 +1649,10 @@ impl RadBuilderApp {
                 ui.checkbox(&mut self.preview_mode, "Preview Mode (F5)")
                     .on_hover_text("Toggle preview mode: interact with widgets without selection handles");
             });
+            });
 
-            ui.menu_button("Settings", |ui| {
+            ui.push_id("menu_settings", |ui| {
+                ui.menu_button("Settings", |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Grid Size");
                     ui.add(egui::DragValue::new(&mut self.grid_size).range(1.0..=64.0));
@@ -1598,6 +1698,7 @@ impl RadBuilderApp {
                             );
                         });
                 });
+                });
             });
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1629,6 +1730,7 @@ impl RadBuilderApp {
                 }
                 ui.separator();
                 ui.strong("egui RAD GUI Builder");
+            });
             });
         });
     }
@@ -1827,37 +1929,40 @@ impl RadBuilderApp {
     }
 
     fn generated_panel(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.heading("Generated Output");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.checkbox(&mut self.syntax_highlighting, "Syntax Highlighting")
-                    .on_hover_text(
-                        "Toggle syntax highlighting (may affect performance with large code)",
-                    );
+        ui.push_id("generated_panel", |ui| {
+            ui.horizontal(|ui| {
+                ui.heading("Generated Output");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.checkbox(&mut self.syntax_highlighting, "Syntax Highlighting")
+                        .on_hover_text(
+                            "Toggle syntax highlighting (may affect performance with large code)",
+                        );
+                });
             });
-        });
-        ui.label("Rust code (or JSON export) will appear here. Copy-paste into your app.");
+            ui.label("Rust code (or JSON export) will appear here. Copy-paste into your app.");
 
-        // A scrollable viewport for the generated text:
-        egui::ScrollArea::vertical()
-            .id_salt("generated_output_scroll")
-            .max_height(280.0)
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                if self.syntax_highlighting && !self.generated.is_empty() {
-                    // Display with syntax highlighting (read-only view)
-                    let job = self.highlighter.layout_job(&self.generated);
-                    ui.add(egui::Label::new(job).selectable(true));
-                } else {
-                    // Plain text editor (editable)
-                    let editor = egui::TextEdit::multiline(&mut self.generated)
-                        .code_editor()
-                        .lock_focus(true)
-                        .desired_rows(18)
-                        .desired_width(f32::INFINITY);
-                    ui.add(editor);
-                }
-            });
+            // A scrollable viewport for the generated text:
+            egui::ScrollArea::vertical()
+                .id_salt("generated_output_scroll")
+                .max_height(280.0)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    if self.syntax_highlighting && !self.generated.is_empty() {
+                        // Display with syntax highlighting (read-only view)
+                        let job = self.highlighter.layout_job(&self.generated);
+                        ui.add(egui::Label::new(job).selectable(true));
+                    } else {
+                        // Plain text editor (editable)
+                        let editor = egui::TextEdit::multiline(&mut self.generated)
+                            .id_salt("generated_output_editor")
+                            .code_editor()
+                            .lock_focus(true)
+                            .desired_rows(18)
+                            .desired_width(f32::INFINITY);
+                        ui.add(editor);
+                    }
+                });
+        });
     }
 
     fn generate_code(&self) -> String {
@@ -1897,10 +2002,14 @@ impl RadBuilderApp {
                 "#[derive(Clone)]\n\
 				 struct GenTreeNode { label: String, children: Vec<GenTreeNode> }\n\
 				 \n\
-				 fn gen_show_tree(ui: &mut egui::Ui, nodes: &[GenTreeNode]) {\n\
-				 \tfor n in nodes {\n\
+				 fn gen_show_tree(ui: &mut egui::Ui, nodes: &[GenTreeNode], path: &mut Vec<usize>) {\n\
+				 \tfor (idx, n) in nodes.iter().enumerate() {\n\
 				 \t\tif n.children.is_empty() { ui.label(&n.label); }\n\
-				 \t\telse { ui.collapsing(&n.label, |ui| gen_show_tree(ui, &n.children)); }\n\
+				 \t\telse {\n\
+				 \t\t\tpath.push(idx);\n\
+				 \t\t\tegui::CollapsingHeader::new(&n.label).id_salt((\"tree_node\", path.clone())).show(ui, |ui| gen_show_tree(ui, &n.children, path));\n\
+				 \t\t\tpath.pop();\n\
+				 \t\t}\n\
 				 \t}\n\
 				 }\n\n",
             );
@@ -2071,6 +2180,7 @@ impl RadBuilderApp {
         let emit_widget = |w: &Widget, out: &mut String, origin: &str| {
             let pos = w.pos;
             let size = w.size;
+            out.push_str(&format!("    ui.push_id((\"widget\", {}), |ui| {{\n", w.id));
             match w.kind {
 				WidgetKind::MenuButton=>{
 					let items_code = if w.props.items.is_empty() {
@@ -2083,13 +2193,15 @@ impl RadBuilderApp {
 						x=w.pos.x, y=w.pos.y, w=w.size.x, h=w.size.y
 					));
 					out.push_str(&format!("        let items = vec![{items}];\n", items=items_code));
+					out.push_str(&format!("        ui.push_id((\"menu_button\", {}), |ui| {{\n", w.id));
 					out.push_str(&format!(
-						"        ui.menu_button(\"{}\", |ui| {{\n", escape(&w.props.text)
+						"            ui.menu_button(\"{}\", |ui| {{\n", escape(&w.props.text)
 					));
 					out.push_str(&format!(
-						"            for (i, it) in items.iter().enumerate() {{ if ui.button(it).clicked() {{ state.sel_{id} = i; ui.close_kind(egui::UiKind::Menu); }} }}\n",
+						"                for (i, it) in items.iter().enumerate() {{ if ui.button(it).clicked() {{ state.sel_{id} = i; ui.close_kind(egui::UiKind::Menu); }} }}\n",
 						id = w.id
 					));
+					out.push_str("            });\n");
 					out.push_str("        });\n");
 					out.push_str("    });\n");
 				}
@@ -2237,14 +2349,14 @@ impl RadBuilderApp {
                 }
                 WidgetKind::CollapsingHeader => {
                     out.push_str(&format!(
-                        "    ui.scope_builder(egui::UiBuilder::new().max_rect(egui::Rect::from_min_size({origin} + egui::vec2({:.1},{:.1}), egui::vec2({:.1},{:.1}))), |ui| {{ egui::CollapsingHeader::new(\"{}\").default_open(state.open_{}).show(ui, |ui| {{ ui.label(\"… place your inner content here …\"); }}); }});\n",
-                        pos.x, pos.y, size.x, size.y, escape(&w.props.text), w.id
+                        "    ui.scope_builder(egui::UiBuilder::new().max_rect(egui::Rect::from_min_size({origin} + egui::vec2({:.1},{:.1}), egui::vec2({:.1},{:.1}))), |ui| {{ egui::CollapsingHeader::new(\"{}\").id_salt((\"collapsing_header\", {})).default_open(state.open_{}).show(ui, |ui| {{ ui.label(\"… place your inner content here …\"); }}); }});\n",
+                        pos.x, pos.y, size.x, size.y, escape(&w.props.text), w.id, w.id
                     ));
                 }
                 WidgetKind::DatePicker => {
                     out.push_str(&format!(
-                        "    ui.scope_builder(egui::UiBuilder::new().max_rect(egui::Rect::from_min_size({origin} + egui::vec2({:.1},{:.1}), egui::vec2({:.1},{:.1}))), |ui| {{ ui.horizontal(|ui| {{ ui.label(\"{}\"); ui.add(DatePickerButton::new(&mut state.date_{})); }}); }});\n",
-                        pos.x, pos.y, size.x, size.y, escape(&w.props.text), w.id
+                        "    ui.scope_builder(egui::UiBuilder::new().max_rect(egui::Rect::from_min_size({origin} + egui::vec2({:.1},{:.1}), egui::vec2({:.1},{:.1}))), |ui| {{ ui.horizontal(|ui| {{ ui.label(\"{}\"); let date_picker_id = format!(\"date_picker_{}\", {}); ui.add(DatePickerButton::new(&mut state.date_{}).id_salt(&date_picker_id)); }}); }});\n",
+                        pos.x, pos.y, size.x, size.y, escape(&w.props.text), w.id, w.id, w.id
                     ));
                 }
                 WidgetKind::Password => {
@@ -2352,14 +2464,16 @@ impl RadBuilderApp {
                         "    ui.scope_builder(egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(\
 							{origin} + egui::vec2({x:.1},{y:.1}), egui::vec2({w:.1},{h:.1}))), |ui| {{ \
 							let nodes: Vec<GenTreeNode> = {nodes}; \
-							egui::ScrollArea::vertical().auto_shrink([false,false]).show(ui, |ui| {{ \
-								gen_show_tree(ui, &nodes); \
+							egui::ScrollArea::vertical().id_salt((\"tree_scroll\", {id})).auto_shrink([false,false]).show(ui, |ui| {{ \
+								let mut path = Vec::new(); \
+								gen_show_tree(ui, &nodes, &mut path); \
 							}}); \
 						}});\n",
                         x = pos.x,
                         y = pos.y,
                         w = size.x,
                         h = size.y,
+                        id = w.id,
                         nodes = nodes_literal,
                     ));
                 }
@@ -2430,7 +2544,7 @@ impl RadBuilderApp {
                     out.push_str(&format!(
                         "    ui.scope_builder(egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(\
                             {origin} + egui::vec2({x:.1},{y:.1}), egui::vec2({w:.1},{h:.1}))), |ui| {{ \
-                            egui::ScrollArea::vertical().auto_shrink([false,false]).show(ui, |ui| {{ \
+                            egui::ScrollArea::vertical().id_salt((\"code_scroll\", {id})).auto_shrink([false,false]).show(ui, |ui| {{ \
                                 ui.add(egui::TextEdit::multiline(&mut state.code_{id}).code_editor().desired_width({w:.1}).desired_rows(8)); \
                             }}); \
                         }});\n",
@@ -2514,7 +2628,7 @@ impl RadBuilderApp {
                     out.push_str(&format!(
                         "    ui.scope_builder(egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(\
                             {origin} + egui::vec2({x:.1},{y:.1}), egui::vec2({w:.1},{h:.1}))), |ui| {{ \
-                            egui::ScrollArea::both().max_width({sw:.1}).max_height({sh:.1}).auto_shrink([false,false]).show(ui, |ui| {{ \
+                            egui::ScrollArea::both().id_salt((\"scroll_box\", {id})).max_width({sw:.1}).max_height({sh:.1}).auto_shrink([false,false]).show(ui, |ui| {{ \
                                 ui.label(\"{text}\"); \
                             }}); \
                         }});\n",
@@ -2522,6 +2636,7 @@ impl RadBuilderApp {
                         y = pos.y,
                         w = size.x,
                         h = size.y,
+                        id = w.id,
                         sw = size.x - 4.0,
                         sh = size.y - 4.0,
                         text = escape(&w.props.text),
@@ -2575,6 +2690,7 @@ impl RadBuilderApp {
                     ));
                 }
             }
+            out.push_str("    });\n");
         };
 
         let mut top = Vec::new();
@@ -2753,10 +2869,14 @@ impl RadBuilderApp {
                 "#[derive(Clone)]\n\
                  struct GenTreeNode { label: String, children: Vec<GenTreeNode> }\n\
                  \n\
-                 fn gen_show_tree(ui: &mut egui::Ui, nodes: &[GenTreeNode]) {\n\
-                     for n in nodes {\n\
+                 fn gen_show_tree(ui: &mut egui::Ui, nodes: &[GenTreeNode], path: &mut Vec<usize>) {\n\
+                     for (idx, n) in nodes.iter().enumerate() {\n\
                          if n.children.is_empty() { ui.label(&n.label); }\n\
-                         else { ui.collapsing(&n.label, |ui| gen_show_tree(ui, &n.children)); }\n\
+                         else {\n\
+                             path.push(idx);\n\
+                             egui::CollapsingHeader::new(&n.label).id_salt((\"tree_node\", path.clone())).show(ui, |ui| gen_show_tree(ui, &n.children, path));\n\
+                             path.pop();\n\
+                         }\n\
                      }\n\
                  }\n\n",
             );
