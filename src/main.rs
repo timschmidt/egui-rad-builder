@@ -1,6 +1,7 @@
 //! A lightweight RAD GUI builder for `egui` written in Rust.
 
 mod app;
+mod highlight;
 mod project;
 mod widget;
 

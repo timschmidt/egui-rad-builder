@@ -12,6 +12,9 @@ readme = "README.md"
 chrono = "0.4.42"
 eframe = "0.33.0"
 egui = { version = "0.33", features = ["serde"] }
-egui_extras = { version = "0.33.0", features = ["chrono"] }
+# egui_dock = "0.18"  # Reserved for future docking system
+egui_extras = { version = "0.33.0", features = ["chrono", "syntect"] }
+rfd = "0.15"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+syntect = { version = "5.2", default-features = false, features = ["default-fancy"] }
