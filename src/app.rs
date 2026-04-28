@@ -1726,8 +1726,6 @@ impl RadBuilderApp {
                     ui.separator();
                     ui.label(format!("{} selected", self.selected.len()));
                 }
-                ui.separator();
-                ui.strong("egui RAD GUI Builder");
             });
             });
         });
