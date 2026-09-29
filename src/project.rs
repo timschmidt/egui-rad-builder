@@ -2,7 +2,7 @@ use crate::widget::Widget;
 use egui::{Vec2, vec2};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Project {
     pub(crate) widgets: Vec<Widget>,
     pub(crate) canvas_size: Vec2,

@@ -85,7 +85,7 @@ impl WidgetCategory {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Widget {
     pub(crate) id: WidgetId,
     pub(crate) kind: WidgetKind,
@@ -512,7 +512,7 @@ impl WidgetKind {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WidgetProps {
     pub(crate) text: String,  // label/button/textedit placeholder
     pub(crate) checked: bool, // checkbox

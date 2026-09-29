@@ -291,24 +291,12 @@ impl WidgetKind {
 }
 ```
 
-#### 5. No Undo/Redo Support
-**Problem:** Users cannot undo accidental deletions or modifications.
-
-**Solution:** Implement command pattern with history stack:
-```rust
-enum Command {
-    AddWidget(Widget),
-    DeleteWidget(WidgetId),
-    MoveWidget(WidgetId, Pos2, Pos2),
-    ResizeWidget(WidgetId, Vec2, Vec2),
-    ModifyProps(WidgetId, WidgetProps, WidgetProps),
-}
-
-struct History {
-    undo_stack: Vec<Command>,
-    redo_stack: Vec<Command>,
-}
-```
+#### 5. Undo/Redo Support ✅ IMPLEMENTED
+**Solution:** Implemented snapshot-based history with `History` and `HistorySnapshot`:
+- `Ctrl+Z` to undo, `Ctrl+Y` or `Ctrl+Shift+Z` to redo.
+- Edit menu integration with dynamic enabled/disabled state.
+- Interactive transaction batching for canvas dragging, resizing, and inspector controls.
+- Automatic history reset on new/open/import project.
 
 #### 6. No Native File Save/Load
 **Problem:** Users must copy JSON from editor and paste it back in. No native file dialogs.
@@ -382,12 +370,12 @@ All basic shortcuts now available:
 - `Delete` - Delete selected widget
 - `Ctrl+C/V` - Copy/paste widget
 - `Ctrl+D` - Duplicate widget
+- `Ctrl+Z/Y` - Undo/redo (also `Ctrl+Shift+Z`)
 - `Ctrl+G` - Generate code
 - `Arrow keys` - Nudge selected widget
 - `] / [` - Z-order controls
 
 **Still needed:**
-- `Ctrl+Z/Y` - Undo/redo
 - `Ctrl+S` - Save project
 
 #### 10. Widget Alignment Tools
@@ -509,7 +497,7 @@ Leverage `egui_dock` as an application template layer where generated RAD window
 2. ~~Add widget copy/paste~~ ✅
 3. ~~Z-order controls~~ ✅
 4. ~~Improved palette (scrollable, collapsible categories)~~ ✅
-5. Implement undo/redo (Command pattern) - *Deferred*
+5. ~~Implement undo/redo (Snapshot-based History with Edit menu and Ctrl+Z/Y)~~ ✅
 6. ~~Add native file save/load (`rfd` crate)~~ ✅ File menu with New/Open/Save/Save As
 7. ~~Add error handling with user feedback~~ ✅ Status message display
 8. **NEW:** Add `.on_hover_text()` tooltips throughout UI (egui best practice) ✅ Partial - menu items have tooltips

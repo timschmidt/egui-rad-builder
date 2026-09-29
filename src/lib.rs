@@ -12,6 +12,7 @@
 pub mod app;
 /// Syntax highlighting helpers used by generated-code previews.
 pub mod highlight;
+mod history;
 mod project;
 /// Widget metadata, defaults, and palette categorization.
 pub mod widget;
